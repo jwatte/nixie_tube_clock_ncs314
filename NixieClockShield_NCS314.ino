@@ -4,7 +4,6 @@
 #include <EEPROM.h>
 #include "OneWire.h"
 #include "Debounce.h"
-#include "Tone.h"
 
 
 #define INIT_ANIMATE_COUNT 3
@@ -39,8 +38,6 @@ void setRTCDateTime(byte h, byte m, byte s, byte d, byte mon, byte y, byte w);
 Debounce setButton(pinSet);
 Debounce upButton(pinUp);
 Debounce downButton(pinDown);
-
-Tone tone1;
 
 enum Mode {
   DisplayTime,
@@ -79,7 +76,6 @@ void setup()
   pinMode(BlueLedPin, OUTPUT);
 
   pinMode(pinBuzzer, OUTPUT);
-  tone1.begin(pinBuzzer);
 
   pinMode(LEpin, OUTPUT);
   pinMode(DHVpin, OUTPUT);
@@ -136,6 +132,7 @@ bool animating = false;
 int animatecount = INIT_ANIMATE_COUNT;
 uint32_t dots = 0;
 
+#define LO_TEMP 58
 #define MIN_TEMP 66
 #define MED_TEMP 71
 #define HI_TEMP 76
@@ -144,20 +141,26 @@ void writeTempColor() {
   unsigned char red = 0;
   unsigned char green = 0;
   unsigned char blue = 0;
-  if (gTemperature < MIN_TEMP) {
-    blue = 255;
+  if (gTemperature < LO_TEMP) {
+    blue = 127;
+    green = 63;
+    red = 127;
+  } else if (gTemperature < MIN_TEMP) {
+    blue = 127;
+    green = 63 * (MIN_TEMP - gTemperature) / (MIN_TEMP - LO_TEMP);
+    red = 127 * (MIN_TEMP - gTemperature) / (MIN_TEMP - LO_TEMP);
   } else if (gTemperature < MED_TEMP) {
-    blue = 255 * (MED_TEMP - gTemperature) / (MED_TEMP - MIN_TEMP);
-    green = 255 * (gTemperature - 64) / (MED_TEMP - MIN_TEMP);
+    blue = 127 * (MED_TEMP - gTemperature) / (MED_TEMP - MIN_TEMP);
+    green = 63 * (gTemperature - 64) / (MED_TEMP - MIN_TEMP);
   } else if (gTemperature < HI_TEMP) {
-    green = 255 * (HI_TEMP - gTemperature) / (HI_TEMP - MED_TEMP);
-    red = 255 * (gTemperature - MED_TEMP) / (HI_TEMP - MED_TEMP);
+    green = 63 * (HI_TEMP - gTemperature) / (HI_TEMP - MED_TEMP);
+    red = 127 * (gTemperature - MED_TEMP) / (HI_TEMP - MED_TEMP);
   } else {
-    red = 255;
+    red = 127;
   }
-  analogWrite(RedLedPin, red>>2);
-  analogWrite(GreenLedPin, green>>3);
-  analogWrite(BlueLedPin, blue>>2);
+  analogWrite(RedLedPin, red);
+  analogWrite(GreenLedPin, green);
+  analogWrite(BlueLedPin, blue);
 }
 
 void newMode(Mode nm) {
@@ -177,6 +180,8 @@ void newMode(Mode nm) {
       dots = 0x40000000UL;
       break;
   }
+  mode = nm;
+  modeTime = millis();
 }
 
 void generateDisplay() {
@@ -194,6 +199,10 @@ uint32_t getSetMode(int dig) {
   uint32_t ret = 0x3ff;
   if (!(millis() & 256)) {
     ret = 0;
+  }
+  if (mode == DisplayTemp && setMode == SetModeNone) {
+    if (dig == 0 || dig == 5) return 0;
+    if (dig == 1 && gTemperature < 100) return 0;
   }
   switch (dig) {
     case 0: case 1: if (setMode == SetModeYear || setMode == SetModeHour) return ret; break;
@@ -286,13 +295,12 @@ void loop() {
     generateDisplay();
   }
 
-  if (now - modeTime >= modeDuration[mode]) {
+  if ((now - modeTime >= modeDuration[mode]) && (setMode == SetModeNone)) {
     mode = (Mode)(mode + 1);
     if (mode == ModeEnd) {
       mode = DisplayTime;
     }
     newMode(mode);
-    modeTime = now;
   }
 
   setButton.update();
@@ -300,7 +308,7 @@ void loop() {
   downButton.update();
 
   if (setButton.clicked()) {
-    tone1.play(1000, 70);
+    tone(pinBuzzer, 1000, 30);
     setModeTime = millis();
     if (setButton.longclick() || (setMode + 1 == SetModeEnd)) {
       setMode = SetModeNone;
@@ -311,7 +319,7 @@ void loop() {
     }
   }
   if (setMode != SetModeNone) {
-    if (now - setModeTime > 10000) {
+    if (now - setModeTime > 30000) {
       setMode = SetModeNone;
       getRTCTime();
       newMode(DisplayTime);
@@ -319,11 +327,11 @@ void loop() {
       int delta = 0;
       if (upButton.clicked()) {
         delta = 1;
-        tone1.play(1500, 70);
+        tone(pinBuzzer, 1500, 30);
       }
       if (downButton.clicked()) {
         delta = -1;
-        tone1.play(750, 70);
+        tone(pinBuzzer, 750, 70);
       }
       switch (setMode) {
         case SetModeHour:   RTC_hours   = wrap(RTC_hours+delta, 0, 23); break;
@@ -333,6 +341,13 @@ void loop() {
         case SetModeMonth:  RTC_month   = wrap(RTC_month+delta, 1, 12); break;
         case SetModeDay:    RTC_day     = wrap(RTC_day+delta, 1, monthlength(RTC_year, RTC_month)); break;
       }
+    }
+  } else {
+    if (upButton.clicked()) {
+      newMode(DisplayTime);
+    }
+    if (downButton.clicked()) {
+      newMode(DisplayTemp);
     }
   }
 

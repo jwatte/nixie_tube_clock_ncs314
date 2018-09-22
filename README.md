@@ -7,5 +7,5 @@ find more pleasing.
 
 For the original, see https://github.com/afch/NixeTubesShieldNCS314
 
-I import the OneWire and Tone libraries straight into the sketch. The 
+I import the OneWire library straight into the sketch. The 
 Debounce and other code is mostly my own.
